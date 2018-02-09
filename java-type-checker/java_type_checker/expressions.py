@@ -31,6 +31,12 @@ class Variable(Expression):
         self.name = name                    #: The name of the variable
         self.declared_type = declared_type  #: The declared type of the variable (Type)
 
+    def static_type(self):
+        return self.declared_type
+
+    def check_types(self):
+        pass
+
 
 class Literal(Expression):
     """ A literal value entered in the code, e.g. `5` in the expression `x + 5`.
@@ -39,10 +45,22 @@ class Literal(Expression):
         self.value = value  #: The literal value, as a string
         self.type = type    #: The type of the literal (Type)
 
+    def static_type(self):
+        return self.type
+
+    def check_types(self):
+        pass
+
 
 class NullLiteral(Literal):
     def __init__(self):
         super().__init__("null", Type.null)
+
+    def static_type(self):
+        return Type.null
+
+    def check_types(self):
+        pass
 
 
 class MethodCall(Expression):
@@ -55,6 +73,32 @@ class MethodCall(Expression):
         self.method_name = method_name  #: The name of the method to call (String)
         self.args = args                #: The method arguments (list of Expressions)
 
+    def static_type(self):
+        return self.receiver.static_type().method_named(self.method_name).return_type
+
+    def check_types(self):
+
+        if not self.receiver.static_type().is_subtype_of(Type.object):
+            raise JavaTypeError(
+                "Type {0} does not have methods".format(self.receiver.static_type().name))
+
+        target_args = self.receiver.static_type().method_named(self.method_name).argument_types
+        if len(target_args) != len(self.args):
+            raise JavaTypeError(
+                "Wrong number of arguments for {0}: expected {1}, got {2}".format(
+                    self.receiver.static_type().name + "." + self.method_name + "()",
+                    len(target_args),
+                    len(self.args)))
+
+        for i, arg in enumerate(self.args):
+            arg.check_types()
+            if not (arg.static_type().is_subtype_of(target_args[i])):
+                raise JavaTypeError(
+                    "{0} expects arguments of type {1}, but got {2}".format(
+                        self.receiver.static_type().name + "." + self.method_name + "()",
+                        names(target_args),
+                        types(self.args)))
+
 
 class ConstructorCall(Expression):
     """
@@ -63,6 +107,33 @@ class ConstructorCall(Expression):
     def __init__(self, instantiated_type, *args):
         self.instantiated_type = instantiated_type  #: The type to instantiate (Type)
         self.args = args                            #: Constructor arguments (list of Expressions)
+
+    def static_type(self):
+        return self.instantiated_type
+
+    def check_types(self):
+        if not self.instantiated_type.is_subtype_of(Type.object):
+            raise JavaTypeError(
+                "Type {0} is not instantiable".format(self.instantiated_type.name))
+        if self.instantiated_type == Type.null:
+            raise JavaTypeError(
+                "Type null is not instantiable")
+
+        target_args = self.instantiated_type.constructor.argument_types
+        if len(target_args) != len(self.args):
+            raise JavaTypeError(
+                "Wrong number of arguments for {0} constructor: expected {1}, got {2}".format(
+                    self.instantiated_type.name,
+                    len(target_args),
+                    len(self.args)))
+        for i, arg in enumerate(self.args):
+            arg.check_types()
+            if not (arg.static_type().is_subtype_of(target_args[i])):
+                raise JavaTypeError(
+                    "{0} constructor expects arguments of type {1}, but got {2}".format(
+                        self.instantiated_type.name,
+                        names(target_args),
+                        types(self.args)))
 
 
 class JavaTypeError(Exception):
@@ -75,3 +146,9 @@ def names(named_things):
     """ Helper for formatting pretty error messages
     """
     return "(" + ", ".join([e.name for e in named_things]) + ")"
+
+
+def types(typed_things):
+    """ Helper for formatting pretty error messages
+    """
+    return "(" + ", ".join([e.static_type().name for e in typed_things]) + ")"
